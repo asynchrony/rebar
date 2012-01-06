@@ -65,7 +65,7 @@
     ok = unpack_archive(UpgradeArchive),
 
     %% Boot file changes
-    {ok, _} = boot_files(TargetDir, NewVer, NewName),
+    ok = boot_files(TargetDir, NewVer, NewName),
 
     %% Tar up upgrade archive with boot file changes
     make_tar(UpgradeArchive),
@@ -159,29 +159,29 @@ run_systools(NewVer, Name) ->
     end.
 
 boot_files(TargetDir, Ver, Name) ->
-    ok = filelib:ensure_dir(filename:join([".", ?TMP, "releases", Ver])),
+    TmpVerDir = filename:join([".", ?TMP, "releases", Ver]),
+    TargetVerDir = filename:join([TargetDir, "releases", Ver]),
+    NameBoot = Name ++ ".boot",
+
     case os:type() of
         {win32,_} ->
-            ok = file:rename(
-                filename:join([".", ?TMP, "releases", Ver, "start.boot"]),
-                filename:join([".", ?TMP, "releases", Ver, Name ++ ".boot"]));
+            {ok, _} = file:copy(
+                filename:join([TmpVerDir, "start.boot"]),
+                filename:join([TargetVerDir, NameBoot]));
         _ ->
             ok = file:make_symlink(
-                   filename:join(["start.boot"]),
-                   filename:join([".", ?TMP, "releases", Ver, Name ++ ".boot"]))
+                filename:join(["start.boot"]),
+                filename:join([TmpVerDir, Name ++ ".boot"]))
     end,
-    {ok, _} =
-        file:copy(
-          filename:join([TargetDir, "releases", Ver, "start_clean.boot"]),
-          filename:join([".", ?TMP, "releases", Ver, "start_clean.boot"])),
 
-    {ok, _} = file:copy(
-                filename:join([TargetDir, "releases", Ver, "sys.config"]),
-                filename:join([".", ?TMP, "releases", Ver, "sys.config"])),
+    Bootfiles0 = filelib:wildcard("*.boot", TargetVerDir),
+    Bootfiles = [ F || F <- Bootfiles0, F =/= NameBoot ],
+    CopyFun = fun(File) -> {ok, _} = copy(File, TargetVerDir, TmpVerDir) end,
+    lists:foreach(CopyFun, Bootfiles ++ ["sys.config", "vm.args"]).
 
-    {ok, _} = file:copy(
-                filename:join([TargetDir, "releases", Ver, "vm.args"]),
-                filename:join([".", ?TMP, "releases", Ver, "vm.args"])).
+copy(File, FromDir, ToDir) ->
+    file:copy(filename:join([FromDir, File]),
+              filename:join([ToDir, File])).
 
 unpack_archive(Filename) ->
     ok = erl_tar:extract(Filename, [compressed, {cwd, ?TMP}]),
