@@ -60,11 +60,15 @@
     %% Build the package
     run_systools(NameVer, NewName),
 
+    %% Unpack the upgrade archive
+    UpgradeArchive = NameVer ++ ".tar.gz",
+    ok = unpack_archive(UpgradeArchive),
+
     %% Boot file changes
     {ok, _} = boot_files(TargetDir, NewVer, NewName),
 
-    %% Extract upgrade and tar it back up with changes
-    make_tar(NameVer, NewVer, NewName),
+    %% Tar up upgrade archive with boot file changes
+    make_tar(UpgradeArchive),
 
     %% Clean up files that systools created
     ok = cleanup(NameVer),
@@ -155,12 +159,12 @@ run_systools(NewVer, Name) ->
     end.
 
 boot_files(TargetDir, Ver, Name) ->
-    ok = file:make_dir(filename:join([".", ?TMP])),
-    ok = file:make_dir(filename:join([".", ?TMP, "releases"])),
-    ok = file:make_dir(filename:join([".", ?TMP, "releases", Ver])),
+    ok = filelib:ensure_dir(filename:join([".", ?TMP, "releases", Ver])),
     case os:type() of
         {win32,_} ->
-            ok;
+            ok = file:rename(
+                filename:join([".", ?TMP, "releases", Ver, "start.boot"]),
+                filename:join([".", ?TMP, "releases", Ver, Name ++ ".boot"]));
         _ ->
             ok = file:make_symlink(
                    filename:join(["start.boot"]),
@@ -179,29 +183,14 @@ boot_files(TargetDir, Ver, Name) ->
                 filename:join([TargetDir, "releases", Ver, "vm.args"]),
                 filename:join([".", ?TMP, "releases", Ver, "vm.args"])).
 
-make_tar(NameVer, NewVer, NewName) ->
-    Filename = NameVer ++ ".tar.gz",
-    {ok, Cwd} = file:get_cwd(),
-    Absname = filename:join([Cwd, Filename]),
-    ok = file:set_cwd(?TMP),
-    ok = erl_tar:extract(Absname, [compressed]),
-    ok = file:delete(Absname),
-    case os:type() of
-        {win32,_} ->
-            {ok, _} =
-                file:copy(
-                  filename:join([".", "releases", NewVer, "start.boot"]),
-                  filename:join([".", "releases", NewVer, NewName ++ ".boot"])),
-            ok;
-        _ ->
-            ok
-    end,
-    {ok, Tar} = erl_tar:open(Absname, [write, compressed]),
-    ok = erl_tar:add(Tar, "lib", []),
-    ok = erl_tar:add(Tar, "releases", []),
-    ok = erl_tar:close(Tar),
-    ok = file:set_cwd(Cwd),
-    ?CONSOLE("~s upgrade package created~n", [NameVer]).
+unpack_archive(Filename) ->
+    ok = erl_tar:extract(Filename, [compressed, {cwd, ?TMP}]),
+    ok = file:delete(Filename).
+
+make_tar(Filename) ->
+    FileList = [{Dir, filename:join([?TMP, Dir])} || Dir <- ["lib", "releases"]],
+    ok = erl_tar:create(Filename, FileList, [write, compressed]),
+    ?CONSOLE("~s upgrade package created~n", [Filename]).
 
 cleanup(NameVer) ->
     ?DEBUG("Removing files needed for building the upgrade~n", []),
